@@ -35,6 +35,7 @@ Utility functions
 # use the URL as a citation.
 # Debug: the file path is relative to the current directory where the python
 # command was run, not where this file is.
+# for PDF see https://github.com/pdfminer/pdfminer.six
 def get_source_documents(file: str ='../tests/data/arubaWikipedia.txt') -> list:
     with open(file) as f:
         source_documents = f.read()
@@ -97,6 +98,66 @@ def get_llm_summary(
         return ""
     
 
+'''
+Slot constructor mirrors same in dialog.js, enabling the client to pass it to
+the server and vice versa. Use *exactly* the same variable name as BotConfig.js
+This is used for expert-authored Q&A conversations
+'''
+class Slot:
+    def __init__(self):
+        self.name:      str = ''
+        self.type:      str = ''
+        self.ask:       str = ''
+        self.replyId:   str = ''
+        self.trigger:   str = ''
+
+
+'''
+Round constructor for storing one conversation round, defined as starting with 
+a user query/reply, 
+and ending with the answer this service replied with. Includes the embedding
+model and LLM portions of the reply. Sent to the web-client where its used in
+the reply to the user. This constructor mirrors same in dialog.js, enabling 
+the client to pass it to the server and vice versa. TODO: add the top 4 new 
+attrs to dialog.js
+'''
+class Round:
+    def __init__(self):
+        # free text user input for when replyValues are not used
+        self.user_reply: str = ''
+        # list of strings, where each string is one embedding model result
+        self.embedding_results: list = []
+        # what was shown to the user from the LLM
+        self.summarized_answer: str = ''
+        # embedding model provides links we show to the user. list items are
+        # string hrefs
+        self.reference_links: list = [] 
+        self.slot: Slot = None
+        self.frameId: str = ''
+        # user selections for when free text user input is not allowed
+        self.replyValues: list = []
+        self.replyIndexes: list = []
+        self.ending: str = ''
+        self.stats: str = ''
+
+
+'''
+Conversation constructor for storing and operating on conversation state over a
+single-topic conversation where history needs to be stored. This includes
+the prompt passed to the LLM, user inputs/queries, and context pulled
+from the embedding model. LT this should mirror the slot, frame, and round objects
+in dialog.js and botConfig.js. They need a string free text reply object added.
+'''
+class Conversation:
+    def __init__(self):
+        # list of Round objects
+        self.completedRounds: list = [Round] 
+        # preambles begin the prompt string
+        self.preamble: str = ("Acting as an expert on Aruba, answer the "
+            "question based on the context below. If the question can't be "
+            "answered based on the context, say \"I don't know\"\n\n")
+        
+
 
 '''
 Build the prompt to pass to the LLM, including the user query, embeddings, and
@@ -109,9 +170,7 @@ def make_prompt(
 
 ) -> str:
     
-    prompt = ("Acting as an expert on Aruba, answer the question based on the"  
-    "context below. If the question can't be answered based on the context," 
-    f"say \"I don't know\"\n\nContext: {embedding_results}\n\n---\n\n" 
+    prompt = ("Context: {embedding_results}\n\n---\n\n" 
     f"Question: {user_query}\nAnswer:")
 
     return prompt
@@ -167,8 +226,9 @@ Top level flow
 '''
 paragraphs = get_source_documents()
 init_embeddings(paragraphs)
-user_query = 'What is papiamento?' 
+user_query = 'Who first settled Aruba?' 
 
+# Round 1
 embedding_list = get_embeddings(user_query)
 print(f'Embedding results:\n{embedding_list}\n')
 
@@ -177,6 +237,18 @@ print(f'Prompt:\n{prompt}\n')
 
 answer = get_llm_summary(prompt)
 print(f'Answer:\n{answer}\n')
+
+# Round 2
+embedding_list = get_embeddings(f'{user_query}' )
+print(f'Embedding results:\n{embedding_list}\n')
+
+prompt = make_prompt(user_query, embedding_list)
+print(f'Prompt:\n{prompt}\n')
+
+answer = get_llm_summary(prompt)
+print(f'Answer:\n{answer}\n')
+
+
 
 
 
