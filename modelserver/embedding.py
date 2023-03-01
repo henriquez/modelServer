@@ -28,12 +28,12 @@ class Slot:
     the server and vice versa. Use *exactly* the same variable name as BotConfig.js
     This is used for expert-authored Q&A conversations
     '''
-    def __init__(self, name, type, ask, replyId, trigger):
-        self.name:      str = ''
-        self.type:      str = ''
-        self.ask:       str = ''
-        self.replyId:   str = ''
-        self.trigger:   str = ''
+    def __init__(self, name, type = '', ask = '', replyId = '', trigger = ''):
+        self.name = name
+        self.type = type
+        self.ask = ask
+        self.replyId = replyId
+        self.trigger = trigger
 
 
 
@@ -46,25 +46,108 @@ class Round:
     enabling the client to pass it to the server and vice versa. 
     TODO: add the top 4 new attrs to dialog.js. 
     '''
-    def __init__(self, user_reply, embeddingResults, summarizedAnswer, 
-                 referenceLinks, slot, frameId, replyValues, replyIndexes, 
-                 ending, stats):
-        # free text user input for when replyValues are not used
-        self.userReply: str = ''
+
+    EMBED_RESULT_COUNT = 3 # number of results returned by embedding model
+
+    def __init__(self, preamble, userInput, 
+                slot = None, 
+                frameId = None, 
+                replyValues = None, 
+                replyIndexes = None, 
+                ending = None):
+        ##### these vars are passed in from the Conversation object
+        self.preamble = preamble
+
+        ###### these vars are passed in from the web-client
+        # free text user input given *this round*, including the first user query.
+        # used when replyValues are not used.
+        # TODO: have this class deserialize JSON to set? 
+        self.userInput = userInput
+        self.slot = slot
+        self.frameId = frameId
+        # user selections for when free text user input is not allowed
+        self.replyValues = replyValues
+        self.replyIndexes = replyIndexes
+        self.ending = ending
+
+        ##### server side calculated values #####
+
+        # After Round is created, populate the server source values - as a 
+        # result, Round is ready to be returned to the user after created.
         # list of strings, where each string is one embedding model result
-        self.embeddingResults: list = []
-        # what was shown to the user from the LLM
-        self.summarizedAnswer: str = ''
+        self.embeddingResults = self.get_embeddings()
+        # reply returned to the user (from the LLM)
+        self.answer = self.get_llm_summary()
         # embedding model provides links we show to the user. list items are
         # string hrefs
-        self.referenceLinks: list = [] 
-        self.slot: Slot = None
-        self.frameId: str = ''
-        # user selections for when free text user input is not allowed
-        self.replyValues: list = []
-        self.replyIndexes: list = []
-        self.ending: str = ''
-        self.stats: str = ''
+        # TODO: self.referenceLinks = ?
+        # TODO: who serializes the class to JSON? a class method or fastAPI?
+
+    
+    def prompt(self) -> str:
+        '''Return prompt to pass to the LLM, including the user query, embeddings, and
+        other fixed strings to make the query better
+        '''
+        prompt = (f"{self.preamble}\n\n" 
+                  f"Context:\n{self.embeddingResults}\n\n---\n\n"
+                  f"Question: {self.userInput}\nAnswer:")
+        
+        return prompt
+
+
+    def get_embeddings(self) -> list:
+        '''Set self.embeddingResults with the embedding model. No return value.
+        Called in constructor
+        '''
+        # request a result from embedding 
+        result_dict = collection.query(query_texts=[self.userInput], 
+                                       n_results=Round.EMBED_RESULT_COUNT)
+        return result_dict['documents']
+
+
+
+    def get_llm_summary(self) -> str:
+        '''Returns response from LLM (A summary aka 'completion' from OpenAI 
+        See https://platform.openai.com/docs/api-reference/completions/create 
+        '''
+        MODEL = "text-davinci-003"
+        # Constants used in LLM API call:
+        # max tokens to generate in the completion
+        MAX_TOKENS = 100
+        # What sampling temperature to use, between 0 and 2. Higher values like 0.8 
+        # will make the output more random, while lower values like 0.2 will make it 
+        # more focused and deterministic.
+        TEMPERATURE = 0
+        # Number between -2.0 and 2.0. Positive values penalize new tokens based on 
+        # whether they appear in the text so far, increasing the model's likelihood 
+        # to talk about new topics.
+        PRESENCE_PENALTY = 0
+        # Number between -2.0 and 2.0. Positive values penalize new tokens based on 
+        # their existing frequency in the text so far, decreasing the model's 
+        # likelihood to repeat the same line verbatim.
+        FREQUENCY_PENALTY = 0
+        # Number of completions to generate
+        N = 1
+ 
+
+        try:
+            # Create a completions using the question and context
+            prompt = self.prompt()
+            
+            response = openai.Completion.create(
+                prompt=prompt,
+                temperature=TEMPERATURE,
+                max_tokens=MAX_TOKENS,
+                model=MODEL,
+                presence_penalty=PRESENCE_PENALTY,
+                frequency_penalty=FREQUENCY_PENALTY,
+                n=N
+            )
+            return response["choices"][0]["text"].strip()
+
+        except Exception as e:
+            print(e)
+            return ""
 
 
 
@@ -76,14 +159,17 @@ class Conversation:
     in dialog.js and botConfig.js. They need a string free text reply object added.
     TODO: determine if the missing attrs in dialog.js are needed server side.
     '''
-    def __init__(self, completedRounds, preamble):
+    def __init__(self):
         # list of Round objects
-        self.completedRounds: list = [Round] 
+        # TODO: at conversation start, does webclient pass in completedRounds?
+        self.completedRounds = [] 
         # preambles begin the prompt string
-        self.preamble: str = ("Acting as an expert on Aruba, answer the "
+        self.preamble = ("Acting as an expert on Aruba, answer the "
             "question based on the context below. If the question can't be "
             "answered based on the context, say \"I don't know\"\n\n")
         
+    
+
 
 ############### Utility functions ################
 
@@ -115,67 +201,6 @@ def get_source_documents(file: str ='../tests/data/arubaWikipedia.txt') -> list:
 
 
 
-def get_llm_summary(
-        # encode as str, array of str, array of tokens, or array of token arrays
-        # should include everything in the prompt including embeddings and user query
-        prompt: str,
-        model: str = "text-davinci-003",
-        # max tokens to generate in the completion
-        max_tokens: int = 100,
-        # What sampling temperature to use, between 0 and 2. Higher values like 0.8 
-        # will make the output more random, while lower values like 0.2 will make it 
-        # more focused and deterministic.
-        temperature: float = 0,
-        # Number between -2.0 and 2.0. Positive values penalize new tokens based on 
-        # whether they appear in the text so far, increasing the model's likelihood 
-        # to talk about new topics.
-        presence_penalty: float = 0,
-        # Number between -2.0 and 2.0. Positive values penalize new tokens based on 
-        # their existing frequency in the text so far, decreasing the model's 
-        # likelihood to repeat the same line verbatim.
-        frequency_penalty: float = 0,
-        # Number of completions to generate
-        n: int = 1,
-        debug: bool = False) -> str:
-    '''Request summary aka 'completion' from OpenAI completions endpoint (LLM)
-    See https://platform.openai.com/docs/api-reference/completions/create for params
-    Returns: str with the response from the LLM
-    '''
-
-    if debug:
-        print("Prompt:\n" + prompt)
-        print("\n\n")
-
-    try:
-        # Create a completions using the question and context
-        response = openai.Completion.create(
-            prompt=prompt,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            frequency_penalty=frequency_penalty,
-            presence_penalty=presence_penalty,
-            model=model,
-        )
-        return response["choices"][0]["text"].strip()
-    except Exception as e:
-        print(e)
-        return ""
-    
-
-
-
-
-
-def make_prompt(user_query: str, embedding_results: list = []) -> str:
-    '''Build the prompt to pass to the LLM, including the user query, embeddings, and
-    other fixed strings to make the query better
-    Returns: str with the prompt
-    '''
-    
-    prompt = ("Context: {embedding_results}\n\n---\n\n" 
-    f"Question: {user_query}\nAnswer:")
-
-    return prompt
 
 
 
@@ -206,17 +231,7 @@ def init_embeddings(paragraphs: list) -> None:
 
 
 
-def get_embeddings(query: str) -> list:
-    '''Query the embedding model given a user query.
-    Returns: list of strings containing paragraphs from the model
-    '''
-    # request a result from embedding 
-    result_dict = collection.query(
-        query_texts=[query],
-        n_results=3
-    )
 
-    return(result_dict['documents'])
 
 
 
@@ -224,18 +239,20 @@ def get_embeddings(query: str) -> list:
 
 paragraphs = get_source_documents()
 init_embeddings(paragraphs)
-user_query = 'Who first settled Aruba?' 
 
-# Round 1
-embedding_list = get_embeddings(user_query)
-print(f'Embedding results:\n{embedding_list}\n')
+############ Conversation starts #############
+# TODO: server receives user query from web client
 
-prompt = make_prompt(user_query, embedding_list)
-print(f'Prompt:\n{prompt}\n')
+conversation = Conversation()
+round1 = Round(conversation.preamble, 'Who first settled Aruba?') 
+conversation.completedRounds.append(round1)
+print('-------------- DEbug -------------')
+# print(f'Embedding results:\n{round1.embeddingResults}\n')
+print(f'Prompt:\n{round1.prompt()}\n')
+print(f'Answer:\n{round1.answer}\n')
 
-answer = get_llm_summary(prompt)
-print(f'Answer:\n{answer}\n')
 
+'''
 # Round 2
 embedding_list = get_embeddings(f'{user_query}' )
 print(f'Embedding results:\n{embedding_list}\n')
@@ -245,6 +262,7 @@ print(f'Prompt:\n{prompt}\n')
 
 answer = get_llm_summary(prompt)
 print(f'Answer:\n{answer}\n')
+'''
 
 
 
