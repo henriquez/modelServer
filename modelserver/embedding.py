@@ -77,6 +77,7 @@ class Round:
         # TODO: should embeddingResults be a object with referenceLinks and
         # text?
         self.embeddingResults = self.get_embeddings(self.userInput)
+        print(f'++++++embddingResults:\n{self.embeddingResults}\n++++end embedResults')
         prompt = self.make_prompt(self.userInput, 
                                   self.embeddingResults, 
                                   conversation)
@@ -86,22 +87,27 @@ class Round:
 
 
     
-    def make_prompt(userInput, embeddingResults, conversation) -> str:
+    def make_prompt(self, userInput, embeddingResults, conversation) -> str:
         '''Return prompt to pass to the LLM, including the user query, embeddings, and
         other fixed strings to make the query better. Prompts must include
         the embeddings, question, and answer from previous rounds.
         '''
         # preamble only needed once
         prompt = f"{conversation.preamble}\n\n"
+        
         # add previous rounds
         for round in conversation.completedRounds:
-           prompt += (f"Context:\n{round.embeddingResults}\n\n---\n\n"
+           prompt += (f"\nContext:\n{round.embeddingResults}\n\n---\n\n"
                   f"Question: {round.userInput}\nAnswer: {round.answer}") 
+           print(f'---history PROMPT:\n{prompt}\n----- end history PROMPT')
 
         # finally add this round
         prompt += (f"Context:\n{embeddingResults}\n\n---\n\n"
                   f"Question: {userInput}\nAnswer:")
         
+        print('-------------- BEGIN PROMPT -------------')
+        print(prompt)
+        print('-------------- END PROMPT -------------')
         return prompt
 
 
@@ -172,9 +178,11 @@ class Conversation:
         # TODO: at conversation start, does webclient pass in completedRounds?
         self.completedRounds = [] 
         # preambles begin the prompt string
-        self.preamble = ("Acting as an expert on Aruba, answer the "
-            "question based on the context below. If the question can't be "
-            "answered based on the context, say \"I don't know\"\n\n")
+        self.preamble = ("Acting as an expert on Aruba, answer the questions below"
+                         "based on the context below. If a question can't be "
+                         "answered based on the context, say \"I don't know\"."
+                         "Answer each question retaining conversational history" 
+                         "from question to question.")
         
     
 
@@ -254,25 +262,17 @@ init_embeddings(paragraphs)
 conversation = Conversation()
 round1 = Round(conversation, 'Who first settled Aruba?') 
 conversation.completedRounds.append(round1)
-print('-------------- BEGIN PROMPT -------------')
-print(f'Prompt:\n{round1.prompt()}\n')
-print('-------------- END PROMPT -------------')
-print('-------------- ANSWER -------------')
+
+
+print('-------------- ANSWER 1-------------')
 print(f'Answer:\n{round1.answer}\n')
-round2 = Round(conversation.preamble, 'What group settled Aruba next?') 
+
+round2 = Round(conversation, 'What group settled Aruba next?') 
 conversation.completedRounds.append(round2)
 
-'''
-# Round 2
-embedding_list = get_embeddings(f'{user_query}' )
-print(f'Embedding results:\n{embedding_list}\n')
+print('-------------- ANSWER 2-------------')
+print(f'Answer:\n{round2.answer}\n')
 
-prompt = make_prompt(user_query, embedding_list)
-print(f'Prompt:\n{prompt}\n')
-
-answer = get_llm_summary(prompt)
-print(f'Answer:\n{answer}\n')
-'''
 
 
 
