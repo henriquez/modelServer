@@ -47,16 +47,13 @@ class Round:
     TODO: add the top 4 new attrs to dialog.js. 
     '''
 
-    EMBED_RESULT_COUNT = 3 # number of results returned by embedding model
-
-    def __init__(self, preamble, userInput, 
+    def __init__(self, conversation, userInput, 
                 slot = None, 
                 frameId = None, 
                 replyValues = None, 
                 replyIndexes = None, 
                 ending = None):
-        ##### these vars are passed in from the Conversation object
-        self.preamble = preamble
+
 
         ###### these vars are passed in from the web-client
         # free text user input given *this round*, including the first user query.
@@ -74,39 +71,52 @@ class Round:
 
         # After Round is created, populate the server source values - as a 
         # result, Round is ready to be returned to the user after created.
+        # We save everything in a Round that is needed to re-create the prompt
+        # with history in the next conversation round.
         # list of strings, where each string is one embedding model result
-        self.embeddingResults = self.get_embeddings()
+        # TODO: should embeddingResults be a object with referenceLinks and
+        # text?
+        self.embeddingResults = self.get_embeddings(self.userInput)
+        prompt = self.make_prompt(self.userInput, 
+                                  self.embeddingResults, 
+                                  conversation)
         # reply returned to the user (from the LLM)
-        self.answer = self.get_llm_summary()
-        # embedding model provides links we show to the user. list items are
-        # string hrefs
-        # TODO: self.referenceLinks = ?
+        self.answer = self.get_llm_summary(prompt)
         # TODO: who serializes the class to JSON? a class method or fastAPI?
 
+
     
-    def prompt(self) -> str:
+    def make_prompt(userInput, embeddingResults, conversation) -> str:
         '''Return prompt to pass to the LLM, including the user query, embeddings, and
-        other fixed strings to make the query better
+        other fixed strings to make the query better. Prompts must include
+        the embeddings, question, and answer from previous rounds.
         '''
-        prompt = (f"{self.preamble}\n\n" 
-                  f"Context:\n{self.embeddingResults}\n\n---\n\n"
-                  f"Question: {self.userInput}\nAnswer:")
+        # preamble only needed once
+        prompt = f"{conversation.preamble}\n\n"
+        # add previous rounds
+        for round in conversation.completedRounds:
+           prompt += (f"Context:\n{round.embeddingResults}\n\n---\n\n"
+                  f"Question: {round.userInput}\nAnswer: {round.answer}") 
+
+        # finally add this round
+        prompt += (f"Context:\n{embeddingResults}\n\n---\n\n"
+                  f"Question: {userInput}\nAnswer:")
         
         return prompt
 
 
-    def get_embeddings(self) -> list:
-        '''Set self.embeddingResults with the embedding model. No return value.
-        Called in constructor
+    def get_embeddings(self, userInput) -> list:
+        '''return embedding results with the embedding model. Called in constructor
         '''
+        EMBED_RESULT_COUNT = 3
         # request a result from embedding 
-        result_dict = collection.query(query_texts=[self.userInput], 
-                                       n_results=Round.EMBED_RESULT_COUNT)
+        result_dict = collection.query(query_texts=[userInput], 
+                                       n_results=EMBED_RESULT_COUNT)
         return result_dict['documents']
 
 
 
-    def get_llm_summary(self) -> str:
+    def get_llm_summary(self, prompt) -> str:
         '''Returns response from LLM (A summary aka 'completion' from OpenAI 
         See https://platform.openai.com/docs/api-reference/completions/create 
         '''
@@ -132,8 +142,6 @@ class Round:
 
         try:
             # Create a completions using the question and context
-            prompt = self.prompt()
-            
             response = openai.Completion.create(
                 prompt=prompt,
                 temperature=TEMPERATURE,
@@ -244,13 +252,15 @@ init_embeddings(paragraphs)
 # TODO: server receives user query from web client
 
 conversation = Conversation()
-round1 = Round(conversation.preamble, 'Who first settled Aruba?') 
+round1 = Round(conversation, 'Who first settled Aruba?') 
 conversation.completedRounds.append(round1)
-print('-------------- DEbug -------------')
-# print(f'Embedding results:\n{round1.embeddingResults}\n')
+print('-------------- BEGIN PROMPT -------------')
 print(f'Prompt:\n{round1.prompt()}\n')
+print('-------------- END PROMPT -------------')
+print('-------------- ANSWER -------------')
 print(f'Answer:\n{round1.answer}\n')
-
+round2 = Round(conversation.preamble, 'What group settled Aruba next?') 
+conversation.completedRounds.append(round2)
 
 '''
 # Round 2
