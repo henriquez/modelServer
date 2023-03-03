@@ -38,9 +38,7 @@ class Conversation:
         # preambles begin the prompt string
         self.preamble = ("Acting as an expert on Aruba, answer the questions below"
                          "based on the context below. If a question can't be "
-                         "answered based on the context, say \"I don't know\"."
-                         "Answer each question retaining conversational history" 
-                         "from question to question.")
+                         "answered based on the context, say \"I don't know\".")
         
 
 
@@ -108,26 +106,21 @@ class Round:
         # text?
 
         # save current embedding (list of strings) in round obj
-        self.embeddings = self.get_embeddings(self.userInput)[0]
+        self.embeddings = self.get_embeddings(self.userInput)
 
-        # assemble all embeddings thus far into one array for use in prompt
-        previous_embeddings = [round.embeddings for round in 
-                                    conversation.completedRounds]
-        all_embeddings = previous_embeddings.append(self.embeddings)
-        
-        prompt = self.make_prompt(self.userInput, 
-                                  all_embeddings, 
-                                  conversation.preamble)
+        # assemble prompt, including previous rounds
+        request = self.assemble_llm_request(self.userInput, self.embeddings,
+                                            conversation)
         
         # set answer in this round (reply returned to the user from the LLM)
-        self.answer = self.get_llm_summary(prompt)
+        self.answer = self.make_llm_request(request)
 
         # TODO: who serializes the class to JSON? a class method or fastAPI?
 
 
     
-    def make_prompt(self, userInput: str, embeddings: list, 
-                    preamble: str) -> str:
+    def assemble_llm_request(self, userInput: str, embeddings,
+                                conversation: Conversation) -> str:
         '''Return prompt to pass to OpenAI ChatCompletions endpoing.
         Including the user query, embeddings, and
         other fixed strings to make the query better. There is 
@@ -135,31 +128,26 @@ class Round:
         4096 tokens is limit for gpt-3.5-turbo. Truncate at 2000 chars to be safe.
         See https://platform.openai.com/docs/guides/chat/introduction
         '''
-        # preamble only needed once, 
-        prompt = f"{preamble}\n\n"
-        
-        # start context section
-        prompt += "\nContext:\n"
+        # preamble only needed once in initial system role
+        messages = [{"role": "system", "content": conversation.preamble}]      
 
-        # add all embedding results into one context 
-        for embedding in embeddings:
-           prompt += f"{embedding}\n" 
-        
-        # end context section, start Q&A section
-        prompt += "\n\n---\n\n"
-
-        # add previous round questions and answers
+        # add previous round user questions, embeddings and bot answers
         for round in conversation.completedRounds:
-           prompt += f"Question: {round.userInput}\nAnswer: {round.answer}" 
+           messages.append({"role": "user", "content": 
+                            f"{(' ').join(round.embeddings)}\n{round.userInput}" 
+                            })
+           messages.append({"role": "assistant", "content": round.answer})
 
-        # finally add Question from this round
-        prompt += f"Question: {userInput}\nAnswer:"
+        # add this round's question and embeddings
+        messages.append({"role": "user", "content": 
+                         f"{(' ').join(embeddings)}\n{userInput}" 
+                        })
         
-        print('-------------- BEGIN PROMPT -------------')
-        #print(prompt)
-        print('-------------- END PROMPT -------------')
+        print('-------------- BEGIN messages -------------')
+        print(messages)
+        print('-------------- END messages -------------')
 
-        return prompt
+        return messages
 
 
     def get_embeddings(self, userInput: str) -> list:
@@ -179,7 +167,7 @@ class Round:
 
 
 
-    def get_llm_summary(self, 
+    def make_llm_request(self, 
                         # list of messages as defined by https://platform.openai.com/docs/guides/chat/introduction
                         messages: list) -> str:
         '''Returns string response from chat completions endpoint '''
@@ -209,7 +197,6 @@ class Round:
                 model=MODEL,
                 temperature=TEMPERATURE,
                 max_tokens=MAX_TOKENS,
-                model=MODEL,
                 presence_penalty=PRESENCE_PENALTY,
                 frequency_penalty=FREQUENCY_PENALTY,
                 n=N,
@@ -307,7 +294,7 @@ conversation.completedRounds.append(round1)
 print('-------------- ANSWER 1-------------')
 print(f'Answer:\n{round1.answer}\n')
 
-round2 = Round(conversation, 'What group settled Aruba next?') 
+round2 = Round(conversation, 'Who settled Aruba next?') 
 conversation.completedRounds.append(round2)
 
 print('-------------- ANSWER 2-------------')
