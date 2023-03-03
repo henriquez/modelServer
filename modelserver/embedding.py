@@ -23,12 +23,40 @@ pp = pprint.PrettyPrinter(indent=4)
 ############### Classes ################
 
 
+class Conversation:
+    '''Conversation constructor for storing and operating on conversation state over a
+    single-topic conversation where history needs to be stored. This includes
+    the prompt passed to the LLM, user inputs/queries, and context pulled
+    from the embedding model. LT this should mirror the slot, frame, and round objects
+    in dialog.js and botConfig.js. They need a string free text reply object added.
+    TODO: determine if the missing attrs in dialog.js are needed server side.
+    '''
+    def __init__(self):
+        # list of Round objects
+        # TODO: at conversation start, does webclient pass in completedRounds?
+        self.completedRounds = [] 
+        # preambles begin the prompt string
+        self.preamble = ("Acting as an expert on Aruba, answer the questions below"
+                         "based on the context below. If a question can't be "
+                         "answered based on the context, say \"I don't know\"."
+                         "Answer each question retaining conversational history" 
+                         "from question to question.")
+        
+
+
+
 class Slot:
     '''Slot constructor mirrors same in dialog.js, enabling the client to pass it to
     the server and vice versa. Use *exactly* the same variable name as BotConfig.js
     This is used for expert-authored Q&A conversations
     '''
-    def __init__(self, name, type = '', ask = '', replyId = '', trigger = ''):
+    def __init__(self, 
+                 name: str, 
+                 type: str, 
+                 ask: str, 
+                 replyId: str, 
+                 trigger = str) -> None:
+        
         self.name = name
         self.type = type
         self.ask = ask
@@ -47,12 +75,14 @@ class Round:
     TODO: add the top 4 new attrs to dialog.js. 
     '''
 
-    def __init__(self, conversation, userInput, 
-                slot = None, 
-                frameId = None, 
-                replyValues = None, 
-                replyIndexes = None, 
-                ending = None):
+    def __init__(self, 
+                conversation: Conversation, 
+                userInput: str, 
+                slot: Slot = None, 
+                frameId: str = None, 
+                replyValues: list = None, 
+                replyIndexes: list = None, 
+                ending: str = None) -> None:
 
 
         ###### these vars are passed in from the web-client
@@ -74,59 +104,86 @@ class Round:
         # We save everything in a Round that is needed to re-create the prompt
         # with history in the next conversation round.
         # list of strings, where each string is one embedding model result
-        # TODO: should embeddingResults be a object with referenceLinks and
+        # TODO: should embeddings be a object with referenceLinks and
         # text?
-        self.embeddingResults = self.get_embeddings(self.userInput)
-        print(f'++++++embddingResults:\n{self.embeddingResults}\n++++end embedResults')
+
+        # save current embedding (list of strings) in round obj
+        self.embeddings = self.get_embeddings(self.userInput)[0]
+
+        # assemble all embeddings thus far into one array for use in prompt
+        previous_embeddings = [round.embeddings for round in 
+                                    conversation.completedRounds]
+        all_embeddings = previous_embeddings.append(self.embeddings)
+        
         prompt = self.make_prompt(self.userInput, 
-                                  self.embeddingResults, 
-                                  conversation)
-        # reply returned to the user (from the LLM)
+                                  all_embeddings, 
+                                  conversation.preamble)
+        
+        # set answer in this round (reply returned to the user from the LLM)
         self.answer = self.get_llm_summary(prompt)
+
         # TODO: who serializes the class to JSON? a class method or fastAPI?
 
 
     
-    def make_prompt(self, userInput, embeddingResults, conversation) -> str:
-        '''Return prompt to pass to the LLM, including the user query, embeddings, and
-        other fixed strings to make the query better. Prompts must include
-        the embeddings, question, and answer from previous rounds.
+    def make_prompt(self, userInput: str, embeddings: list, 
+                    preamble: str) -> str:
+        '''Return prompt to pass to OpenAI ChatCompletions endpoing.
+        Including the user query, embeddings, and
+        other fixed strings to make the query better. There is 
+        no memory of past requests, so include all past requests and responses.
+        4096 tokens is limit for gpt-3.5-turbo. Truncate at 2000 chars to be safe.
+        See https://platform.openai.com/docs/guides/chat/introduction
         '''
-        # preamble only needed once
-        prompt = f"{conversation.preamble}\n\n"
+        # preamble only needed once, 
+        prompt = f"{preamble}\n\n"
         
-        # add previous rounds
-        for round in conversation.completedRounds:
-           prompt += (f"\nContext:\n{round.embeddingResults}\n\n---\n\n"
-                  f"Question: {round.userInput}\nAnswer: {round.answer}") 
-           print(f'---history PROMPT:\n{prompt}\n----- end history PROMPT')
+        # start context section
+        prompt += "\nContext:\n"
 
-        # finally add this round
-        prompt += (f"Context:\n{embeddingResults}\n\n---\n\n"
-                  f"Question: {userInput}\nAnswer:")
+        # add all embedding results into one context 
+        for embedding in embeddings:
+           prompt += f"{embedding}\n" 
+        
+        # end context section, start Q&A section
+        prompt += "\n\n---\n\n"
+
+        # add previous round questions and answers
+        for round in conversation.completedRounds:
+           prompt += f"Question: {round.userInput}\nAnswer: {round.answer}" 
+
+        # finally add Question from this round
+        prompt += f"Question: {userInput}\nAnswer:"
         
         print('-------------- BEGIN PROMPT -------------')
-        print(prompt)
+        #print(prompt)
         print('-------------- END PROMPT -------------')
+
         return prompt
 
 
-    def get_embeddings(self, userInput) -> list:
-        '''return embedding results with the embedding model. Called in constructor
+    def get_embeddings(self, userInput: str) -> list:
+        '''return list of strings embedding results with the embedding model. 
+        Called in constructor
         '''
         EMBED_RESULT_COUNT = 3
         # request a result from embedding 
         result_dict = collection.query(query_texts=[userInput], 
                                        n_results=EMBED_RESULT_COUNT)
-        return result_dict['documents']
+        #p = pprint.PrettyPrinter()
+        #p.pprint(result_dict['documents'][0])
+        # for unknown reason, documents is a list with one element, inside
+        # of which is a list of str where each str is one embedding result
+        # up to EMBED_RESULT_COUNT
+        return result_dict['documents'][0]
 
 
 
-    def get_llm_summary(self, prompt) -> str:
-        '''Returns response from LLM (A summary aka 'completion' from OpenAI 
-        See https://platform.openai.com/docs/api-reference/completions/create 
-        '''
-        MODEL = "text-davinci-003"
+    def get_llm_summary(self, 
+                        # list of messages as defined by https://platform.openai.com/docs/guides/chat/introduction
+                        messages: list) -> str:
+        '''Returns string response from chat completions endpoint '''
+        MODEL = "gpt-3.5-turbo"
         # Constants used in LLM API call:
         # max tokens to generate in the completion
         MAX_TOKENS = 100
@@ -148,16 +205,18 @@ class Round:
 
         try:
             # Create a completions using the question and context
-            response = openai.Completion.create(
-                prompt=prompt,
+            response = openai.ChatCompletion.create(
+                model=MODEL,
                 temperature=TEMPERATURE,
                 max_tokens=MAX_TOKENS,
                 model=MODEL,
                 presence_penalty=PRESENCE_PENALTY,
                 frequency_penalty=FREQUENCY_PENALTY,
-                n=N
+                n=N,
+                messages=messages
             )
-            return response["choices"][0]["text"].strip()
+            # see https://platform.openai.com/docs/guides/chat/response-format
+            return response["choices"][0]["message"]["content"].strip()
 
         except Exception as e:
             print(e)
@@ -165,25 +224,6 @@ class Round:
 
 
 
-class Conversation:
-    '''Conversation constructor for storing and operating on conversation state over a
-    single-topic conversation where history needs to be stored. This includes
-    the prompt passed to the LLM, user inputs/queries, and context pulled
-    from the embedding model. LT this should mirror the slot, frame, and round objects
-    in dialog.js and botConfig.js. They need a string free text reply object added.
-    TODO: determine if the missing attrs in dialog.js are needed server side.
-    '''
-    def __init__(self):
-        # list of Round objects
-        # TODO: at conversation start, does webclient pass in completedRounds?
-        self.completedRounds = [] 
-        # preambles begin the prompt string
-        self.preamble = ("Acting as an expert on Aruba, answer the questions below"
-                         "based on the context below. If a question can't be "
-                         "answered based on the context, say \"I don't know\"."
-                         "Answer each question retaining conversational history" 
-                         "from question to question.")
-        
     
 
 
