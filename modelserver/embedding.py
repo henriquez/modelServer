@@ -287,14 +287,14 @@ init_embeddings(paragraphs)
 # TODO: server receives user query from web client
 
 conversation = Conversation()
-round1 = Round(conversation, 'Who first settled Aruba?') 
+round1 = Round(conversation, 'Who first colonized Aruba?') 
 conversation.completedRounds.append(round1)
 
 
 print('-------------- ANSWER 1-------------')
 print(f'Answer:\n{round1.answer}\n')
 
-round2 = Round(conversation, 'Who settled Aruba next?') 
+round2 = Round(conversation, 'Who colonized the island next?') 
 conversation.completedRounds.append(round2)
 
 print('-------------- ANSWER 2-------------')
