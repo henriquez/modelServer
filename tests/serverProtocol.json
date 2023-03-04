@@ -1,0 +1,58 @@
+// JSON data structure for client requests and server responses. The 
+// requests and responses use the same data structure because the client
+// has to maintain conversational state. This implies that both client and
+// server are only appending rounds and passing the whole history back in
+// a circle. Also pass the entire BotConfig back and forth, because we 
+// want model server to be stateless, and the botConfig might come from 
+// a CDN since its relatively fixed. So "frame" and all its objects
+// are included. 
+// TODO: newSlot and replies in botConfig have to change to accomodate free
+// text entry by user and non-fixed text replies by bot. See the question and 
+// answer formats below. Has to change because expert-driven QA also needs
+// free text, not just the no-expert bot scenario.
+{
+  "frame": {
+    "name": "string", // maps to newFrame.name in BotConfig.js
+    "introduction": "string", // maps to introduction ..
+    "localeString": "string", // maps to same
+    "phrasings": [ "string1", "string2..."], // maps to same
+    "slots": [], // maps to same
+  },
+  "completedRounds": [ // conversation history
+  // each round is one object 
+    {
+      // id of frame the slot belongs to. mapes to frameId in newRound in dialog.js
+      "frameId": "string",
+      "question": 
+        {
+          "name": "string: unique name maps to slot.name in BotConfig.js",
+          "text": "string: maps to slot.ask in BotConfig.js or free text userInput",
+          "type": "string: slotTypeEnum in BotConfig.js",
+          "trigger": "string: expression maps to slot.trigger in BotConfig.js"
+        },
+
+      "answer":
+        {
+          // string required for fixed user selection case, maps to replyId in 
+          // newSlot in BotConfig.js
+          "id": "string",
+          // "indexes" and "values" are both in botConfig, might not need to get
+          // sent to server since question.text and answervalues is all we need 
+          // for the models
+          // "indexes" are for fixed selection case used as index into 
+          // replyValueLens in BotConfig
+          "indexes": "string",
+          /* multiselect on client can have multiple values selected, these are 
+             the output of replyValueLens in BotConfig.js */
+          "values": ["selectedValue 1", "selectedValue 2"],
+          "text": "answer the user gave in free text case or bot gave"
+
+          ""
+        },
+      // String: how the round ended: one of the enum ENDINGS
+      "ending": "string"
+    }
+  // ... more rounds 
+  ],
+  "allReplyOptions: "
+}
