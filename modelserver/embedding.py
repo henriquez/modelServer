@@ -5,6 +5,10 @@ import pprint
 import re
 import os
 import openai
+from dotenv import load_dotenv
+
+load_dotenv() # loads OPENAPI key from ./.env
+
 
 # initialize embedding model
 client = chromadb.Client()
@@ -44,10 +48,7 @@ class Conversation:
 
 
 class Slot:
-    '''Slot constructor mirrors same in dialog.js, enabling the client to pass it to
-    the server and vice versa. Use *exactly* the same variable name as BotConfig.js
-    This is used for expert-authored Q&A conversations
-    '''
+
     def __init__(self, 
                  name: str, 
                  type: str, 
@@ -151,9 +152,7 @@ class Round:
 
 
     def get_embeddings(self, userInput: str) -> list:
-        '''return list of strings embedding results with the embedding model. 
-        Called in constructor
-        '''
+        
         EMBED_RESULT_COUNT = 3
         # request a result from embedding 
         result_dict = collection.query(query_texts=[userInput], 
@@ -219,18 +218,7 @@ class Round:
 
 
 def get_source_documents(file: str ='../tests/data/arubaWikipedia.txt') -> list:
-    # imports text from source_documents and clean it
-    # Returns: array of strings, each is one paragraph from source document
-    # Issues: Leaves in some non-text chars, and topic titles are not combined with 
-    # the paragraph below them.
-    # Features to add: when processing html, need page URLs and ideally paragraph
-    # level URLs paired with the text, so it will return two arrays, as that's what the
-    # Chroma collection.add function wants.
-    # TODO: when crawler is implemented, this should return a Page object, that includes
-    # text and URL as attributes. Then when answers are given for a query, can 
-    # use the URL as a citation.
-    # Debug: the file path is relative to the current directory where the python
-    # command was run, not where this file is.
+
     # for PDF see https://github.com/pdfminer/pdfminer.six
     with open(file) as f:
         source_documents = f.read()
@@ -256,7 +244,7 @@ def init_embeddings(paragraphs: list) -> None:
     # Chroma ids must be strings, just make up ids here in real life these
     # should TODO: come from crawler and be associated with the paragraphs in a Page
     # object/class. For embedding bots, use a URI (URI = scheme ":" ["//" authority] path ["?" query] ["#" fragment])
-    # as metadata like "https://page.support/bots/{uuid}". Theoreticaly the bot could be 
+    # as metadata like "https://example/bots/{uuid}". Theoreticaly the bot could be 
     # hosted anywhere like the company's website, this gives flexibility when the 
     # user clicks the link to launch the bot. In web-client code, look for the bots
     # word in the path then grab the UUID and serve the right bot.
